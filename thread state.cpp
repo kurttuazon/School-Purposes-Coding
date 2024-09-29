@@ -1,0 +1,102 @@
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <chrono> // For sleeping
+#include <atomic> // For thread interruption
+
+std::mutex mtx;
+std::condition_variable cv;
+bool suspended = false;
+std::atomic<bool> terminateThread(false);
+
+// Thread 1: Simulates sleep and unblocked state
+void CustomThread1() {
+    std::cout << std::this_thread::get_id() << ": Unblocked (RUNNING)" << std::endl;
+
+    // Simulate "Blocked" state by sleeping for 10 seconds
+    std::this_thread::sleep_for(std::chrono::seconds(10));
+
+    std::cout << std::this_thread::get_id() << ": Finished (TERMINATED)" << std::endl;
+}
+
+// Thread 2: Allows suspension and resumption
+void CustomThread2() {
+    std::cout << std::this_thread::get_id() << ": Unblocked (RUNNING)" << std::endl;
+
+    while (!terminateThread) {
+        std::unique_lock<std::mutex> lock(mtx);
+
+        // Wait for thread to be resumed if suspended
+        while (suspended) {
+            std::cout << std::this_thread::get_id() << ": Blocked (SUSPENDED)" << std::endl;
+            cv.wait(lock); // Thread waits until resumed
+        }
+
+        lock.unlock();
+
+        // Simulate work
+        std::cout << std::this_thread::get_id() << ": Working..." << std::endl;
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+
+    std::cout << std::this_thread::get_id() << ": Finished (TERMINATED)" << std::endl;
+}
+
+// Function to suspend thread
+void suspend_thread() {
+    std::lock_guard<std::mutex> lock(mtx);
+    suspended = true;
+}
+
+// Function to resume thread
+void resume_thread() {
+    std::lock_guard<std::mutex> lock(mtx);
+    suspended = false;
+    cv.notify_one(); // Notify the waiting thread
+}
+
+int main() {
+    int usrChoice;
+    std::cout << "Enter a number (1 or 2) to choose the thread behavior: ";
+    std::cin >> usrChoice;
+
+    if (usrChoice == 1) {
+        // Thread 1: Sleeps for 10 seconds
+        std::thread thread1(CustomThread1);
+        std::cout << "Thread 1: Spawn (NEW)" << std::endl;
+
+        // Wait for thread to finish
+        thread1.join();
+        std::cout << "Thread 1: Finished (TERMINATED)" << std::endl;
+
+    } else if (usrChoice == 2) {
+        // Thread 2: Suspension and Resumption
+        std::thread thread2(CustomThread2);
+        std::cout << "Thread 2: Spawn (NEW)" << std::endl;
+
+        // Loop for user input to suspend/resume/terminate thread
+        char action;
+        while (true) {
+            std::cout << "Enter 's' to suspend the thread, 'r' to resume, or 't' to terminate: ";
+            std::cin >> action;
+
+            if (action == 's') {
+                suspend_thread();
+            } else if (action == 'r') {
+                resume_thread();
+                std::cout << "Unblocked (RUNNING)" << std::endl;
+            } else if (action == 't') {
+                terminateThread = true; // Set flag to terminate the thread
+                resume_thread(); // In case it's suspended, resume it to allow termination
+                thread2.join();
+                std::cout << "Thread 2: Finished (TERMINATED)" << std::endl;
+                break;
+            }
+        }
+    } else {
+        std::cout << "Invalid choice. Exiting." << std::endl;
+    }
+
+    return 0;
+}
